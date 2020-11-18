@@ -2,18 +2,18 @@
 #include <functional>
 #include <exception>
 #include <string>
-
 #include <iostream>
+#include <mutex>
 
 class TreeException : public std::exception
 {
 	std::string _error;
 public:
 	TreeException(std::string error);
-	char* what();
+	char const* what();
 };
 
-template <class T, typename U = std::less<void>>
+template <class T, typename U = std::less<>>
 class Tree
 {
 public:
@@ -22,18 +22,22 @@ public:
 	Tree(Tree<T, U>&& per) noexcept;
 
 	void add(const T& val);
-	void add(Tree<T, U> cop);
+	void add(const Tree<T, U>& cop);
 	bool find(const T& val) noexcept;
-	Tree<T, U> subTree(const T& val) const;
-	void delSubTree(const T& val);
-	void del_elem(T val);
+	Tree<T, U> subTree(const T& val);
+	void deleteSubTree(const T& val);
+	void deleteElem(const T& val);
+	void clear() noexcept;
 
 	template <class T1, typename U1>
 	friend std::ostream& operator<< (std::ostream& os, const Tree<T1, U1>& tree);
-	void lpk(std::ostream& os = std::cout) const;
+	void lkp(std::ostream& os = std::cout, const char& sep = ' ') noexcept;
+	void klp(std::ostream& os = std::cout, const char& sep = ' ') noexcept;
+	void lpk(std::ostream& os = std::cout, const char& sep = ' ') noexcept;
 
 	~Tree();
 
+protected:
 	struct Root
 	{
 		T _value;
@@ -44,15 +48,18 @@ public:
 
 	typedef Tree<T, U>::Root* pRoot;
 
-protected:
 	U u;
+	std::mutex mtx;
 	pRoot _root;
 
 	static pRoot recursive_copy(const pRoot& cop);
 	void recursive_add(pRoot& root, const T& val);
-	static void recursive_del(pRoot& root);
-	static void recursive_lpk(pRoot root, std::ostream& os);
-	pRoot& recursive_search(pRoot& root, const T& val);
+	void recursive_tree_add(pRoot& root, const pRoot& adding);
+	static void recursive_del(pRoot& root) noexcept;
+	static void recursive_lkp(const pRoot& root, std::ostream& os, const char& sep) noexcept;
+	static void recursive_lpk(const pRoot& root, std::ostream& os, const char& sep) noexcept;
+	static void recursive_klp(const pRoot& root, std::ostream& os, const char& sep) noexcept;
+	pRoot& recursive_search(pRoot& root, const T& val) noexcept;
 };
 
 template<class T, typename U>
@@ -79,43 +86,102 @@ inline Tree<T, U>::Tree(Tree<T, U>&& per) noexcept
 template<class T, typename U>
 inline void Tree<T, U>::add(const T& val)
 {
+	std::lock_guard<std::mutex> im_locked(mtx);
 	recursive_add(_root, val);
 }
 
 template<class T, typename U>
-inline void Tree<T, U>::add(Tree<T, U> cop)
+inline void Tree<T, U>::add(const Tree<T, U>& cop)
 {
-	recursive_search(this->_root, cop._root->_value) = recursive_copy(cop._root);
+	std::lock_guard<std::mutex> im_locked(mtx);
+	recursive_tree_add(_root, cop._root);
 }
 
 template<class T, typename U>
 inline bool Tree<T, U>::find(const T& val) noexcept
 {
+	std::lock_guard<std::mutex> im_locked(mtx);
 	return recursive_search(this->_root, val) != nullptr;
 }
 
 template<class T, typename U>
-inline Tree<T, U> Tree<T, U>::subTree(const T& val) const
+inline Tree<T, U> Tree<T, U>::subTree(const T& val)
 {
 	Tree<T, U> ret_tree;
+	std::lock_guard<std::mutex> im_locked(mtx);
 	ret_tree._root = recursive_copy(recursive_search(_root, val));
 	return ret_tree;
 }
 
 template<class T, typename U>
-inline void Tree<T, U>::delSubTree(const T& val)
+inline void Tree<T, U>::deleteSubTree(const T& val)
 {
+	std::lock_guard<std::mutex> im_locked(mtx);
 	pRoot& found = recursive_search(_root, val);
 	if (found == nullptr)
 		throw TreeException("Element was not found");
-	else
-		recursive_del(found);
+	recursive_del(found);
 }
 
 template<class T, typename U>
-inline void Tree<T, U>::lpk(std::ostream& os) const
+inline void Tree<T, U>::deleteElem(const T& val)
 {
-	recursive_lpk(_root, os);
+	std::lock_guard<std::mutex> im_locked(mtx);
+	pRoot& deleting_elem = recursive_search(_root, val);
+	if (deleting_elem == nullptr)
+		throw TreeException("Elem was not found");
+	pRoot deleting_memory = deleting_elem;
+	if (deleting_elem->_right == nullptr)
+	{
+		deleting_elem = deleting_elem->_left;
+	}
+	else
+	{
+		if (deleting_elem->_right->_left == nullptr)
+		{
+			deleting_elem->_right->_left = deleting_elem->_left;
+			deleting_elem = deleting_elem->_right;
+		}
+		else
+		{
+			pRoot& very_left_elem = deleting_elem->_right->_left;
+			while (very_left_elem->_left != nullptr)
+				very_left_elem = very_left_elem->_left;
+			very_left_elem->_left = deleting_elem->_left;
+			very_left_elem->_right = deleting_elem->_right;
+			deleting_elem = very_left_elem;
+			very_left_elem = nullptr;
+		}
+	}
+	delete deleting_memory;
+}
+
+template<class T, typename U>
+inline void Tree<T, U>::clear() noexcept
+{
+	std::lock_guard<std::mutex> im_locked(mtx);
+	recursive_del(_root);
+}
+
+template<class T, typename U>
+inline void Tree<T, U>::lkp(std::ostream& os, const char& sep) noexcept
+{
+	std::lock_guard<std::mutex> im_locked(mtx);
+	recursive_lkp(_root, os, sep);
+}
+
+template<class T, typename U>
+inline void Tree<T, U>::lpk(std::ostream& os, const char& sep) noexcept
+{
+	std::lock_guard<std::mutex> im_locked(mtx);
+	recursive_lpk(_root, os, sep);
+}
+
+template<class T, typename U>
+inline void Tree<T, U>::klp(std::ostream& os, const char& sep) noexcept
+{
+	std::lock_guard<std::mutex> im_locked(mtx);
+	recursive_klp(_root, os, sep);
 }
 
 template<class T, typename U>
@@ -151,56 +217,72 @@ void Tree<T, U>::recursive_add(pRoot& root, const T& val)
 			throw TreeException("Memory error");
 	}
 	else
+		recursive_add((u(val, root->_value)) ? root->_left : root->_right, val);
+}
+
+template<class T, typename U>
+inline void Tree<T, U>::recursive_tree_add(pRoot& root, const pRoot& adding)
+{
+	if (adding != nullptr)
 	{
-		if (u(val, root->_value))
-			recursive_add(root->_left, val);
-		else
-			recursive_add(root->_right, val);
+		recursive_tree_add(root, adding->_left);
+		recursive_tree_add(root, adding->_right);
+		recursive_add(root, adding->_value);
 	}
 }
 
 template<class T, typename U>
-void Tree<T, U>::recursive_del(pRoot& root)
+void Tree<T, U>::recursive_del(pRoot& root) noexcept
 {
 	if (root != nullptr)
 	{
 		recursive_del(root->_left);
 		recursive_del(root->_right);
-		pRoot deleting = root;
+		delete root;
 		root = nullptr;
-		delete deleting;
 	}
 }
 
 template<class T, typename U>
-void Tree<T, U>::recursive_lpk(pRoot root, std::ostream& os)
+void Tree<T, U>::recursive_lkp(const pRoot& root, std::ostream& os, const char& sep) noexcept
 {
 	if (root != nullptr)
 	{
-		recursive_lpk(root->_left, os);
-		os << root->_value << ' ';
-		recursive_lpk(root->_right, os);
+		recursive_lkp(root->_left, os, sep);
+		os << root->_value << sep;
+		recursive_lkp(root->_right, os, sep);
 	}
 }
 
 template<class T, typename U>
-typename Tree<T, U>::pRoot&
-	Tree<T, U>::recursive_search(typename Tree<T, U>::pRoot& root, const T& val)
+inline void Tree<T, U>::recursive_lpk(const pRoot& root, std::ostream& os, const char& sep) noexcept
 {
 	if (root != nullptr)
 	{
-		if (root->_value == val)
+		recursive_lpk(root->_left, os, sep);
+		recursive_lpk(root->_right, os, sep);
+		os << root->_value << sep;
+	}
+}
+
+template<class T, typename U>
+inline void Tree<T, U>::recursive_klp(const pRoot& root, std::ostream& os, const char& sep) noexcept
+{
+	if (root != nullptr)
+	{
+		os << root->_value << sep;
+		recursive_klp(root->_left, os, sep);
+		recursive_klp(root->_right, os, sep);
+	}
+}
+
+template<class T, typename U>
+typename Tree<T, U>::pRoot& Tree<T, U>::recursive_search(typename Tree<T, U>::pRoot& root, const T& val) noexcept
+{
+	if ((root == nullptr) || (root->_value == val))
 			return root;
-		else
-		{
-			if (u(val, root->_value))
-				return recursive_search(root->_left, val);
-			else
-				return recursive_search(root->_right, val);
-		}
-	}
 	else
-		return root;
+		return recursive_search((u(val, root->_value)) ? root->_left : root->_right, val);
 }
 
 template<class T, typename U>
@@ -209,6 +291,13 @@ inline Tree<T, U>::Root::Root(const T& val) : _left(nullptr), _right(nullptr), _
 template<class T1, typename U1>
 inline std::ostream& operator<<(std::ostream& os, const Tree<T1, U1>& tree)
 {
-	tree.lpk(os);
+	Tree<T1, U1>::recursive_lkp(tree._root, os, ' ');
 	return os;
 }
+
+char const* TreeException::what()
+{
+	return _error.c_str();
+}
+
+inline TreeException::TreeException(std::string error) : _error(error) {}
